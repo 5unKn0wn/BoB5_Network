@@ -1,7 +1,7 @@
 CXX = g++
 CFLAGS = -o
 LDFLAGS = -lpcap
-TARGET = Homework1
+TARGET = homework1
 SOURCE = source.cpp
 
 $(TARGET): $(SOURCE)

@@ -5,7 +5,7 @@ TARGET = Homework1
 SOURCE = source.cpp
 
 $(TARGET): $(SOURCE)
-	$(CC) $(CFLAGS) $@ $< $(LDFLAGS)
+	$(CXX) $(CFLAGS) $@ $< $(LDFLAGS)
 
 clean:
 	rm $(TARGET)

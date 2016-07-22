@@ -1,6 +1,6 @@
 CXX = g++
 CFLAGS = -o
-LDFLAGS = -lpcap
+LDFLAGS = -lpcap -lpthread
 TARGET = arp_send
 SOURCE = source.cpp
 

